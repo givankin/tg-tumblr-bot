@@ -5,3 +5,4 @@
 - add help
 - support gifs
 - move functions out of index.js
+- set bot image avatar
