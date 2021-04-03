@@ -1,9 +1,7 @@
 const tumblr = require('tumblr.js');
 const fs = require('fs');
-const http = require('http');
 const express = require('express');
 const app = express();
-const bodyParser = require('body-parser');
 const axios = require('axios');
 const config = require('./config')
 
@@ -152,19 +150,38 @@ function getRandomPhotoUrl(callback) {
         }, (err, resp) => {
             if (err) throw err;
             const photos = resp.posts[0].photos;
-            console.log(`choosing random photo of ${photos.length} photos in the post`);    
-            const photoUrl = getRandomFromArray(photos).original_size.url;
+            console.log(`choosing random photo of ${photos.length} photos in the post`);
+            const photo = getRandomFromArray(photos);
+            const photoUrl = photo.original_size.url;
             console.log(photoUrl);    
             callback(photoUrl);
         });
     });
 }
 
-function postPhotoToTelegram(chatId, url) {
-    return axios.post(`https://api.telegram.org/bot${tg.bot_token}/sendPhoto`, {
-        chat_id: chatId,
-        photo: url,
-    });
+function isGif(url) {
+    return url.slice(-4).toLowerCase() === '.gif';
+}
+
+function getTgCommand(url) {
+    return `https://api.telegram.org/bot${tg.bot_token}/send${isGif(url) ? 'Animation' : 'Photo'}`;
+}
+
+function getTgPayload(chatId, url) {
+    const payload = {
+        chat_id: chatId
+    };
+    if (isGif(url)) {
+        payload.animation = url;
+    } else {
+        payload.photo = url;
+    }
+    console.log('payload is', payload);
+    return payload;
+}
+
+function postImageToTelegram(chatId, url) {
+    return axios.post(getTgCommand(url), getTgPayload(chatId, url));
 }
 
 function postTextToTelegram(chatId, text) {
@@ -175,17 +192,25 @@ function postTextToTelegram(chatId, text) {
 }
 
 function startTelegramBot() {
-    app.use(bodyParser.json()); // for parsing application/json
-    app.use(
-        bodyParser.urlencoded({
-            extended: true,
-        })
-    ); // for parsing application/x-www-form-urlencoded
+    app.use(express.json());
+    app.use(express.urlencoded({ extended: true })); // for parsing application/x-www-form-urlencoded
     
     // here's the endpoint telegram will call
     app.post('/new-message', function (req, res) {
-        const { message } = req.body;
-        const chatId = message.chat.id;
+        console.log('got a message from tg:');
+        console.log(req.body);
+        const message = req.body.message || req.body.edited_message;
+        let chatId;
+        if (!message) {
+            console.log('Cannot find message in req.body');
+            console.log(req);
+        }
+        if (message.chat) {
+            chatId = message.chat.id;
+        } else {
+            console.log(message);
+            throw new Error('Cannot find chat ID in message from tg');
+        }
         
         if (message.text !== 'гав!') {
             console.log(`message text is "${message.text}", rejecting`);
@@ -193,9 +218,9 @@ function startTelegramBot() {
             res.end('ok');
             return;
         }
-    
+
         getRandomPhotoUrl(url => {
-            postPhotoToTelegram(chatId, url)
+            postImageToTelegram(chatId, url)
             .then(() => {
                 console.log('photo posted');
                 res.end('ok');
